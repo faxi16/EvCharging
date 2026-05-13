@@ -13,26 +13,37 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BatteryChargingFull
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.EvStation
-import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.maherlabbad.EVChargingSystem.ActiveVehicleSession
+import com.maherlabbad.EVChargingSystem.Viewmodels.MyVehiclesViewModel
 
 @Composable
-fun MyVehiclesScreen() {
+fun MyVehiclesScreen(onBack : () -> Unit, viewModel: MyVehiclesViewModel = viewModel(), onNavigateAddVehicle: () -> Unit) {
+
+    val vehicles by viewModel.vehicles.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+
+    // YENİ: ViewModel'dan lokal olarak seçili olan aracın ID'sini dinliyoruz
+    val activeVehicleId by ActiveVehicleSession.activeVehicleId.collectAsState()
+
     // --- Renk Paleti ---
     val primaryColor = Color(0xFF0058BC)
     val primaryContainer = Color(0xFFE0E8FF)
@@ -51,10 +62,9 @@ fun MyVehiclesScreen() {
     Scaffold(
         containerColor = surfaceColor,
         topBar = {
-            // Beyaz Saydam TopAppBar
             Surface(
                 color = surfaceContainerLowest.copy(alpha = 0.9f),
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().statusBarsPadding(),
                 shadowElevation = 1.dp
             ) {
                 Row(
@@ -67,7 +77,7 @@ fun MyVehiclesScreen() {
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(
-                            onClick = { /* Geri Dön */ },
+                            onClick = { onBack() },
                             modifier = Modifier
                                 .size(36.dp)
                                 .background(surfaceContainerHigh, CircleShape)
@@ -82,9 +92,6 @@ fun MyVehiclesScreen() {
                             color = primaryColor,
                             letterSpacing = (-0.5).sp
                         )
-                    }
-                    IconButton(onClick = { /* Bildirimler */ }) {
-                        Icon(Icons.Default.Notifications, contentDescription = "Notifications", tint = primaryColor)
                     }
                 }
             }
@@ -104,46 +111,48 @@ fun MyVehiclesScreen() {
             Column {
                 Text("My Vehicles", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = onSurface)
                 Spacer(modifier = Modifier.height(4.dp))
-                Text("Manage your registered EVs", fontSize = 14.sp, color = onSurfaceVariant)
+                Text("Select an active vehicle to filter chargers", fontSize = 14.sp, color = onSurfaceVariant) // Metin hafifçe güncellendi
             }
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // 1. Araç Kartı (Default)
-            VehicleCard(
-                brandModel = "Tesla Model 3",
-                plate = "35 ABC 123",
-                capacity = "60 kWh",
-                connector = "Type-2",
-                isDefault = true,
-                connectorColor = secondaryColor,
-                primaryColor = primaryColor,
-                surfaceContainerLowest = surfaceContainerLowest,
-                surfaceContainerLow = surfaceContainerLow,
-                surfaceContainer = surfaceContainer,
-                outlineVariant = outlineVariant,
-                onSurface = onSurface,
-                onSurfaceVariant = onSurfaceVariant,
-                primaryContainer = primaryContainer
-            )
+            Column {
+                if (isLoading) {
+                    CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
+                } else if (vehicles.isEmpty()) {
+                    Text("No vehicles found. Add your first EV!")
+                } else {
+                    vehicles.forEach { vehicle ->
+                        // YENİ: Kartın "Seçili" olup olmadığını ViewModel'daki ID ile kıyaslayarak anlıyoruz
+                        val isSelected = (vehicle.plateNumber == activeVehicleId)
 
-            // 2. Araç Kartı (İkincil)
-            VehicleCard(
-                brandModel = "Renault Zoe",
-                plate = "34 XYZ 789",
-                capacity = "52 kWh",
-                connector = "CCS",
-                isDefault = false,
-                connectorColor = tertiaryColor,
-                primaryColor = primaryColor,
-                surfaceContainerLowest = surfaceContainerLowest,
-                surfaceContainerLow = surfaceContainerLow,
-                surfaceContainer = surfaceContainer,
-                outlineVariant = outlineVariant,
-                onSurface = onSurface,
-                onSurfaceVariant = onSurfaceVariant,
-                primaryContainer = primaryContainer
-            )
+                        VehicleCard(
+                            brandModel = "${vehicle.brand} ${vehicle.model}",
+                            plate = vehicle.plateNumber,
+                            capacity = "${vehicle.batteryCapacity} kWh",
+                            connector = vehicle.connectorType,
+                            isDefault = isSelected, // Eğer ID eşleşirse rozet görünür
+                            connectorColor = tertiaryColor,
+                            primaryColor = primaryColor,
+                            surfaceContainerLowest = surfaceContainerLowest,
+                            surfaceContainerLow = surfaceContainerLow,
+                            surfaceContainer = surfaceContainer,
+                            outlineVariant = outlineVariant,
+                            onSurface = onSurface,
+                            onSurfaceVariant = onSurfaceVariant,
+                            primaryContainer = primaryContainer,
+                            onCardClick = {
+                                // YENİ: Karta tıklanınca lokal ViewModel state'ini günceller
+                                viewModel.setActiveVehicle(vehicle.plateNumber, vehicle.connectorType)
+                            },
+                            onDeleteClick = {
+                                viewModel.deleteVehicle(vehicle.plateNumber)
+                            }
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
+                }
+            }
 
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -165,7 +174,7 @@ fun MyVehiclesScreen() {
                             cornerRadius = CornerRadius(16.dp.toPx())
                         )
                     }
-                    .clickable { /* Yeni Araç Ekleme Ekranına Git */ },
+                    .clickable { onNavigateAddVehicle() },
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -182,7 +191,7 @@ fun MyVehiclesScreen() {
                 }
             }
 
-            Spacer(modifier = Modifier.height(100.dp)) // Alttaki NavBar için boşluk
+            Spacer(modifier = Modifier.height(100.dp))
         }
     }
 }
@@ -192,14 +201,19 @@ fun VehicleCard(
     brandModel: String, plate: String, capacity: String, connector: String,
     isDefault: Boolean, connectorColor: Color, primaryColor: Color,
     surfaceContainerLowest: Color, surfaceContainerLow: Color, surfaceContainer: Color,
-    outlineVariant: Color, onSurface: Color, onSurfaceVariant: Color, primaryContainer: Color
+    outlineVariant: Color, onSurface: Color, onSurfaceVariant: Color, primaryContainer: Color,
+    onCardClick: () -> Unit,
+    onDeleteClick: () -> Unit
 ) {
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = surfaceContainerLowest,
-        border = BorderStroke(1.dp, outlineVariant.copy(alpha = 0.3f)),
+        // Eğer seçiliyse mavi kalın çerçeve, değilse normal gri ince çerçeve
+        border = BorderStroke(if (isDefault) 2.dp else 1.dp, if (isDefault) primaryColor else outlineVariant.copy(alpha = 0.3f)),
         shadowElevation = 2.dp,
-        modifier = Modifier.fillMaxWidth().clickable { /* Araç Detayı */ }
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCardClick() } // YENİ: Tıklanabilirlik eklendi
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
@@ -213,7 +227,6 @@ fun VehicleCard(
                     .border(1.dp, outlineVariant.copy(alpha = 0.2f), RoundedCornerShape(12.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                // Şimdilik Placeholder Icon
                 Icon(Icons.Default.DirectionsCar, contentDescription = null, tint = onSurfaceVariant, modifier = Modifier.size(48.dp))
             }
 
@@ -230,7 +243,7 @@ fun VehicleCard(
                         Text(text = brandModel, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = onSurface)
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        // Özel Plaka Tasarımı (License Plate)
+                        // Özel Plaka Tasarımı
                         Surface(
                             shape = RoundedCornerShape(4.dp),
                             color = surfaceContainerLowest,
@@ -238,7 +251,7 @@ fun VehicleCard(
                             shadowElevation = 1.dp
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(modifier = Modifier.width(8.dp).height(24.dp).background(primaryColor)) // TR Mavi Şerit Hissi
+                                Box(modifier = Modifier.width(8.dp).height(24.dp).background(primaryColor))
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = plate,
@@ -246,6 +259,20 @@ fun VehicleCard(
                                     fontWeight = FontWeight.Bold,
                                     letterSpacing = 2.sp,
                                     modifier = Modifier.padding(end = 8.dp)
+                                )
+                            }
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            // Çöp Kutusu Butonu
+                            IconButton(
+                                onClick = { onDeleteClick() },
+                                modifier = Modifier.size(36.dp).offset(x = 8.dp) // Hafif sağa yaslı durması için offset
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Delete,
+                                    contentDescription = "Delete Vehicle",
+                                    tint = Color.Red.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(22.dp)
                                 )
                             }
                         }
@@ -258,7 +285,7 @@ fun VehicleCard(
                             border = BorderStroke(1.dp, primaryColor.copy(alpha = 0.1f))
                         ) {
                             Text(
-                                text = "Default Vehicle",
+                                text = "Selected",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = primaryColor,

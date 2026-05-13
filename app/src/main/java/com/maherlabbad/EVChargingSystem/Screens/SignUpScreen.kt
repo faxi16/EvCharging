@@ -1,15 +1,15 @@
 package com.maherlabbad.EVChargingSystem.Screens
-
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Email
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -18,187 +18,183 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.maherlabbad.EVChargingSystem.Viewmodels.AuthViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SignUpScreen() {
-    // --- State Yönetimi ---
-    var fullName by remember { mutableStateOf("") }
+fun SignUpScreen(
+    onSignUpSuccess: () -> Unit, // Başarılı kayıttan sonra ana sayfaya (veya giriş ekranına) dön
+    onBackToLogin: () -> Unit,    // Geri butonuna basılınca Login'e dön
+    viewModel: AuthViewModel = viewModel()
+) {
+    // ViewModel'den durumları (State) dinliyoruz
+    val isLoading by viewModel.isLoading.collectAsState()
+    val errorMessage by viewModel.errorMessage.collectAsState()
+    val isSuccess by viewModel.isAuthSuccessful.collectAsState()
+
+    // Kullanıcının gireceği değerleri tutan yerel durumlar (Local State)
+    var name by remember { mutableStateOf("") }
+    var surname by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
 
-    // --- Renk Paleti (HTML'den alındı) ---
-    val primaryColor = Color(0xFF0058BC)
-    val backgroundColor = Color(0xFFF9F9FF)
-    val surfaceColor = Color(0xFFFFFFFF)
-    val onSurface = Color(0xFF181C23)
-    val onSurfaceVariant = Color(0xFF414755)
-    val outline = Color(0xFF717786)
-    val outlineVariant = Color(0xFFC1C6D7)
+    // Şifre göster/gizle ikonu için
+    var passwordVisible by remember { mutableStateOf(false) }
 
-    // Arkaplan
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(backgroundColor),
-        contentAlignment = Alignment.Center
-    ) {
-        // Form Kartı (Glassmorphism hissiyatı için Surface)
-        Surface(
+    // Sadece bu ekrana özel "Şifreler uyuşmuyor" hatası için yerel hata değişkeni
+    var localError by remember { mutableStateOf<String?>(null) }
+
+    // Kayıt başarılı olursa doğrudan uygulamanın içine (Haritaya) yönlendir
+    LaunchedEffect(isSuccess) {
+        if (isSuccess) {
+            onSignUpSuccess()
+        }
+    }
+
+    // ViewModel'den gelen hata değiştiğinde yerel hatayı temizle
+    LaunchedEffect(errorMessage) {
+        if (errorMessage != null) localError = null
+    }
+
+    Scaffold(
+        Modifier.scrollable(rememberScrollState(), Orientation.Vertical),
+        topBar = {
+            TopAppBar(
+                modifier = Modifier.fillMaxWidth().statusBarsPadding(),
+                title = { Text("Create Account") },
+                navigationIcon = {
+                    IconButton(onClick = onBackToLogin) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back to Login")
+                    }
+                }
+            )
+        }
+    ) { paddingValues ->
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(paddingValues)
                 .padding(horizontal = 24.dp),
-            shape = RoundedCornerShape(24.dp),
-            color = surfaceColor.copy(alpha = 0.95f),
-            border = BorderStroke(1.dp, outlineVariant.copy(alpha = 0.3f)),
-            shadowElevation = 8.dp
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Column(
+            Text("Join VoltCharge", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("Start your EV charging journey today.", color = Color.Gray)
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            // İsim ve Soyisim (Yan yana)
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Name") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedTextField(
+                    value = surname,
+                    onValueChange = { surname = it },
+                    label = { Text("Surname") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Email
+            OutlinedTextField(
+                value = email,
+                onValueChange = { email = it },
+                label = { Text("Email Address") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Şifre
+            OutlinedTextField(
+                value = password,
+                onValueChange = { password = it },
+                label = { Text("Password") },
+                singleLine = true,
+                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                trailingIcon = {
+                    val image = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff
+                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                        Icon(image, "Toggle password visibility")
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Şifre Tekrar
+            OutlinedTextField(
+                value = confirmPassword,
+                onValueChange = { confirmPassword = it },
+                label = { Text("Confirm Password") },
+                singleLine = true,
+                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Hata Mesajları (Önce yerel hatayı, yoksa ViewModel'den (Supabase'den) gelen hatayı göster)
+            val displayError = localError ?: errorMessage
+            if (displayError != null) {
+                println(displayError)
+                Text(text = displayError, color = MaterialTheme.colorScheme.error, fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            // Kayıt Ol Butonu
+            Button(
+                onClick = {
+                    // Kayıt butonuna basıldığında önce basit kontrolleri yap (Şifreler uyuşuyor mu?)
+                    if (name.isBlank() || surname.isBlank() || email.isBlank() || password.isBlank()) {
+                        localError = "Please fill in all fields."
+                    } else if (password != confirmPassword) {
+                        localError = "Passwords do not match."
+                    } else if (password.length < 6) {
+                        localError = "Password must be at least 6 characters."
+                    } else {
+                        // Her şey tamamsa ViewModel'e gönder!
+                        localError = null
+                        viewModel.register(email, password, name, surname)
+                    }
+                },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+                    .height(50.dp),
+                enabled = !isLoading
             ) {
-                // Başlık Kısmı
-                Text(
-                    text = "Create Account",
-                    fontSize = 32.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = onSurface,
-                    letterSpacing = (-0.5).sp
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Join the future of charging",
-                    fontSize = 16.sp,
-                    color = onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
-
-                Spacer(modifier = Modifier.height(32.dp))
-
-                // Full Name Alanı
-                OutlinedTextField(
-                    value = fullName,
-                    onValueChange = { fullName = it },
-                    placeholder = { Text("Full Name", color = outlineVariant) },
-                    leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, tint = outline) },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = primaryColor,
-                        unfocusedBorderColor = outlineVariant,
-                        focusedContainerColor = surfaceColor,
-                        unfocusedContainerColor = surfaceColor
-                    )
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Email Alanı
-                OutlinedTextField(
-                    value = email,
-                    onValueChange = { email = it },
-                    placeholder = { Text("Email", color = outlineVariant) },
-                    leadingIcon = { Icon(Icons.Default.Email, contentDescription = null, tint = outline) },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = primaryColor,
-                        unfocusedBorderColor = outlineVariant,
-                        focusedContainerColor = surfaceColor,
-                        unfocusedContainerColor = surfaceColor
-                    )
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Password Alanı
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    placeholder = { Text("Password", color = outlineVariant) },
-                    leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null, tint = outline) },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = primaryColor,
-                        unfocusedBorderColor = outlineVariant,
-                        focusedContainerColor = surfaceColor,
-                        unfocusedContainerColor = surfaceColor
-                    )
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Confirm Password Alanı
-                OutlinedTextField(
-                    value = confirmPassword,
-                    onValueChange = { confirmPassword = it },
-                    placeholder = { Text("Confirm Password", color = outlineVariant) },
-                    leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null, tint = outline) }, // Alternatif: LockReset ikonu kullanılabilir
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = primaryColor,
-                        unfocusedBorderColor = outlineVariant,
-                        focusedContainerColor = surfaceColor,
-                        unfocusedContainerColor = surfaceColor
-                    )
-                )
-
-                Spacer(modifier = Modifier.height(32.dp))
-
-                // Submit Butonu
-                Button(
-                    onClick = {
-                        // Supabase kayıt (Sign Up) işlemi burada çağrılacak
-                        println("Kayıt verisi: $fullName, $email")
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    shape = RoundedCornerShape(50),
-                    colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
-                ) {
-                    Text("Create Account", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                if (isLoading) {
+                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp))
+                } else {
+                    Text("Sign Up", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 }
+            }
 
-                Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-                // Alt Link (Giriş Yap Yönlendirmesi)
-                Row(
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Already have an account? ",
-                        color = onSurfaceVariant,
-                        fontSize = 14.sp
-                    )
-                    Text(
-                        text = "Login",
-                        color = primaryColor,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.clickable {
-                            /* Login ekranına yönlendir (Navigation) */
-                        }
-                    )
-                }
+            // Hesabı olanlar için Login'e dönüş butonu
+            TextButton(onClick = onBackToLogin) {
+                Text("Already have an account? Log in")
             }
         }
     }

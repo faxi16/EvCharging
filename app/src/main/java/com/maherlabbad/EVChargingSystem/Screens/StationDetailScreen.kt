@@ -1,8 +1,9 @@
 package com.maherlabbad.EVChargingSystem.Screens
 
+import android.os.Build
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -13,26 +14,64 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.EvStation
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.maherlabbad.EVChargingSystem.Models.Charger
+import com.maherlabbad.EVChargingSystem.Viewmodels.ReservationViewModel
+import com.maherlabbad.EVChargingSystem.Viewmodels.StationDetailViewModel
+import java.time.LocalDate
+import java.time.LocalTime
 
+@RequiresApi(Build.VERSION_CODES.O)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun StationDetailScreen() {
+fun StationDetailScreen(
+    stationId: String,
+    onBack : () -> Unit,
+    onBookingConfirmed : () -> Unit,
+    stationViewModel: StationDetailViewModel = viewModel(),
+    reservationViewModel: ReservationViewModel = viewModel()
+) {
+
+    val station by stationViewModel.station.collectAsState()
+    val chargers by stationViewModel.chargers.collectAsState()
+    val isBookingSuccess by reservationViewModel.isSuccess.collectAsState()
+    val isBookingLoading by reservationViewModel.isLoading.collectAsState()
+    val bookingError by reservationViewModel.errorMessage.collectAsState()
+    val isMaintenance = chargers.all{ it.status == "Maintenance"}
+    var selectedCharger by remember { mutableStateOf<Charger?>(null) }
+
+    var selectedStartTime by remember { mutableStateOf<String?>(null) }
+    var selectedEndTime by remember { mutableStateOf<String?>(null) }
+
+    var showStartTimePicker by remember { mutableStateOf(false) }
+    var showEndTimePicker by remember { mutableStateOf(false) }
+    val isFavorite by stationViewModel.isFavorite.collectAsState()
+
+    // YENİ: UI'da gösterilecek saat seçimi hatası
+    var timeSelectionError by remember { mutableStateOf<String?>(null) }
+
+    val today = remember { LocalDate.now() }
+    val tomorrow = remember { today.plusDays(1) }
+    var selectedDate by remember { mutableStateOf(today) }
+
     // Tema Renkleri
     val primaryColor = Color(0xFF0058BC)
-    val primaryContainer = Color(0xFF0070EB)
     val secondaryColor = Color(0xFF006E28)
     val errorColor = Color(0xFFBA1A1A)
     val errorContainer = Color(0xFFFFDAD6)
@@ -44,48 +83,143 @@ fun StationDetailScreen() {
     val outlineColor = Color(0xFF717786)
     val outlineVariant = Color(0xFFC1C6D7)
 
+    LaunchedEffect(stationId) {
+        stationViewModel.loadStationDetails(stationId)
+    }
+
+    LaunchedEffect(isBookingSuccess) {
+        if (isBookingSuccess) {
+            reservationViewModel.resetSuccessState()
+            onBookingConfirmed()
+        }
+    }
+
+    // --- POP-UP PENCERELERİ (TEKERLEKLİ SAAT) ---
+    if (showStartTimePicker) {
+        DialTimePickerModal(
+            onConfirm = { time ->
+                val parsedTime = LocalTime.parse(time)
+                val selectedDateTime = java.time.LocalDateTime.of(selectedDate, parsedTime)
+                val now = java.time.LocalDateTime.now()
+                val maxAllowed = now.plusHours(24) // Maksimum 24 saat sonrası (DR03)
+
+                if (selectedDateTime.isBefore(now)) {
+                    timeSelectionError = "Geçmiş bir saat seçemezsiniz."
+                } else if (selectedDateTime.isAfter(maxAllowed)) {
+                    timeSelectionError = "En fazla 24 saat sonrasına rezervasyon yapabilirsiniz."
+                } else {
+                    timeSelectionError = null
+                    selectedStartTime = time
+                    showStartTimePicker = false
+                }
+            },
+            onDismiss = { showStartTimePicker = false }
+        )
+    }
+
+    if (showEndTimePicker) {
+        DialTimePickerModal(
+            onConfirm = { time ->
+                val parsedTime = LocalTime.parse(time)
+                val selectedDateTime = java.time.LocalDateTime.of(selectedDate, parsedTime)
+                val now = java.time.LocalDateTime.now()
+                val maxAllowed = now.plusHours(24)
+
+                if (selectedDateTime.isBefore(now)) {
+                    timeSelectionError = "Geçmiş bir saat seçemezsiniz."
+                } else if (selectedDateTime.isAfter(maxAllowed)) {
+                    timeSelectionError = "En fazla 24 saat sonrasına rezervasyon yapabilirsiniz."
+                } else {
+                    timeSelectionError = null
+                    selectedEndTime = time
+                    showEndTimePicker = false
+                }
+            },
+            onDismiss = { showEndTimePicker = false }
+        )
+    }
+
     Scaffold(
         bottomBar = {
-            // Sabit Alt Buton (Confirm Booking)
             Surface(
                 shadowElevation = 24.dp,
                 color = surfaceColor.copy(alpha = 0.95f),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Box(modifier = Modifier.padding(16.dp).padding(bottom = 8.dp)) {
+                Column(modifier = Modifier.padding(16.dp).padding(bottom = 8.dp)) {
+
+                    if (!bookingError.isNullOrEmpty()) {
+                        Text(
+                            text = bookingError!!,
+                            color = errorColor,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(bottom = 8.dp).fillMaxWidth(),
+                            textAlign = TextAlign.Center
+                        )
+                    }
+
                     Button(
-                        onClick = { /* Rezervasyon Onay İşlemi */ },
+                        onClick = {
+                            if (selectedCharger != null && selectedStartTime != null && selectedEndTime != null) {
+                                reservationViewModel.createReservation(
+                                    chargerId = selectedCharger!!.chargerID,
+                                    date = selectedDate.toString(),
+                                    startTime = selectedStartTime!!,
+                                    endTime = selectedEndTime!!
+                                )
+                            }
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(56.dp),
                         shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
+                        colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                        enabled = selectedCharger != null && selectedStartTime != null && selectedEndTime != null && !isBookingLoading
                     ) {
-                        Row(
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Confirm Booking", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null)
+                        if (isBookingLoading) {
+                            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp))
+                        } else {
+                            Row(
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "Confirm Booking",
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Icon(
+                                    Icons.AutoMirrored.Filled.ArrowForward,
+                                    contentDescription = null
+                                )
+                            }
                         }
                     }
                 }
             }
         }
     ) { paddingValues ->
+        if (station == null) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+            return@Scaffold
+        }
+
         Box(modifier = Modifier.fillMaxSize()) {
             // 1. Üst Görsel Alanı (Hero Image)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(280.dp)
-                    .background(surfaceVariant) // Coil eklendiğinde buraya Image gelecek
+                    .background(surfaceVariant)
             ) {
-                // Geri Butonu
                 IconButton(
-                    onClick = { /* Geri Dön */ },
+                    onClick = { onBack() },
                     modifier = Modifier
+                        .align(Alignment.TopStart)
                         .padding(16.dp)
                         .padding(top = 24.dp)
                         .size(40.dp)
@@ -94,7 +228,23 @@ fun StationDetailScreen() {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = onSurface)
                 }
 
-                // Available Badge (Sol Alt)
+                IconButton(
+                    onClick = { stationViewModel.toggleFavorite(stationId) },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(16.dp)
+                        .padding(top = 24.dp)
+                        .size(40.dp)
+                        .background(surfaceColor.copy(alpha = 0.9f), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                        contentDescription = "Favorite",
+                        // Favoriyse kendi belirlediğin primaryColor (Mavi) veya kırmızı(errorColor) yapabilirsin.
+                        tint = if (isFavorite) primaryColor else onSurfaceVariant
+                    )
+                }
+
                 Surface(
                     shape = RoundedCornerShape(50),
                     color = surfaceColor.copy(alpha = 0.9f),
@@ -107,20 +257,20 @@ fun StationDetailScreen() {
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(modifier = Modifier.size(10.dp).background(secondaryColor, CircleShape))
+                        Box(modifier = Modifier.size(10.dp).background(if ( isMaintenance) errorColor else secondaryColor, CircleShape))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Available", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = onSurface)
+                        Text(if (isMaintenance) "Maintenance" else "Available", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if ( isMaintenance) errorColor else onSurface)
                     }
                 }
             }
 
-            // 2. Ana İçerik Kartı (Yukarı taşarak overlapping yapar)
+            // 2. Ana İçerik Kartı
             Surface(
                 shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
                 color = surfaceColor,
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(top = 250.dp) // Görselin üzerine binmesi için
+                    .padding(top = 250.dp)
             ) {
                 Column(
                     modifier = Modifier
@@ -136,7 +286,7 @@ fun StationDetailScreen() {
                         verticalAlignment = Alignment.Top
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("VoltCharge Downtown Hub", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = onSurface)
+                            Text(station?.name ?: "error", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = onSurface)
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.padding(top = 4.dp)
@@ -147,7 +297,8 @@ fun StationDetailScreen() {
                             }
                         }
                         Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(start = 8.dp)) {
-                            Text("₺8.50", fontSize = 20.sp, fontWeight = FontWeight.Black, color = primaryColor)
+                            val displayPrice = selectedCharger?.unitPrice ?: "..."
+                            Text("₺$displayPrice", fontSize = 20.sp, fontWeight = FontWeight.Black, color = primaryColor)
                             Text("per kW/h", fontSize = 14.sp, color = outlineColor)
                         }
                     }
@@ -162,28 +313,40 @@ fun StationDetailScreen() {
                         modifier = Modifier.horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        // Seçili (Aktif) Konektör
-                        ConnectorItemCard(
-                            type = "CCS2", kw = "150 kW", isSelected = true,
-                            statusText = null, statusColor = null, primaryColor = primaryColor, outlineVariant = outlineVariant
-                        )
-                        // Arızalı/Dolu Konektör
-                        ConnectorItemCard(
-                            type = "CHAdeMO", kw = "50 kW", isSelected = false,
-                            statusText = "In Use", statusColor = errorColor, primaryColor = primaryColor, outlineVariant = outlineVariant
-                        )
-                        // Normal Konektör
-                        ConnectorItemCard(
-                            type = "Type 2", kw = "22 kW", isSelected = false,
-                            statusText = null, statusColor = null, primaryColor = primaryColor, outlineVariant = outlineVariant
-                        )
+                        chargers.forEach { charger ->
+                            val isAvailable = charger.status.equals("Available", ignoreCase = true)
+                            val canSelect = charger.status != "Maintenance"
+                            Box(modifier = Modifier.clickable(enabled = canSelect) {
+                                selectedCharger = charger
+                            }) {
+                                ConnectorItemCard(
+                                    type = charger.connectorType,
+                                    kw = "${charger.powerOutput} kW",
+                                    isSelected = (selectedCharger?.chargerID == charger.chargerID),
+                                    statusText = charger.status,
+                                    statusColor = if (isAvailable) null else errorColor,
+                                    primaryColor = primaryColor,
+                                    outlineVariant = outlineVariant
+                                )
+                            }
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(24.dp))
                     HorizontalDivider(color = surfaceVariant)
                     Spacer(modifier = Modifier.height(24.dp))
 
-                    // Saat Seçimi Modülü
+                    // YENİ: Saat Seçimi Modülü Hata Mesajı
+                    if (!timeSelectionError.isNullOrEmpty()) {
+                        Text(
+                            text = timeSelectionError!!,
+                            color = errorColor,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -203,36 +366,60 @@ fun StationDetailScreen() {
                     ) {
                         Row(modifier = Modifier.padding(4.dp)) {
                             Surface(
-                                color = surfaceColor,
+                                color = if (selectedDate == today) surfaceColor else Color.Transparent,
                                 shape = RoundedCornerShape(6.dp),
-                                shadowElevation = 1.dp,
-                                modifier = Modifier.weight(1f).padding(2.dp)
+                                shadowElevation = if (selectedDate == today) 1.dp else 0.dp,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable {
+                                        selectedDate = today
+                                        timeSelectionError = null // Sekme değiştiğinde hatayı sıfırla
+                                    }
+                                    .padding(2.dp)
                             ) {
-                                Text("Today", textAlign = TextAlign.Center, color = primaryColor, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(vertical = 8.dp))
+                                Text("Today", textAlign = TextAlign.Center, color = if (selectedDate == today) primaryColor else onSurfaceVariant, fontWeight = if (selectedDate == today) FontWeight.SemiBold else FontWeight.Normal, modifier = Modifier.padding(vertical = 8.dp))
                             }
-                            Text(
-                                "Tomorrow",
-                                textAlign = TextAlign.Center,
-                                color = onSurfaceVariant,
-                                modifier = Modifier.weight(1f).padding(vertical = 8.dp).clickable { }
-                            )
+                            Surface(
+                                color = if (selectedDate == tomorrow) surfaceColor else Color.Transparent,
+                                shape = RoundedCornerShape(6.dp),
+                                shadowElevation = if (selectedDate == tomorrow) 1.dp else 0.dp,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable {
+                                        selectedDate = tomorrow
+                                        timeSelectionError = null // Sekme değiştiğinde hatayı sıfırla
+                                    }
+                                    .padding(2.dp)
+                            ) {
+                                Text("Tomorrow", textAlign = TextAlign.Center, color = if (selectedDate == tomorrow) primaryColor else onSurfaceVariant, fontWeight = if (selectedDate == tomorrow) FontWeight.SemiBold else FontWeight.Normal, modifier = Modifier.padding(vertical = 8.dp))
+                            }
                         }
                     }
 
-                    // Saat Grid'i (2 Satır, 4 Sütun)
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                            TimeSlotItem("10:00", state = "Disabled", modifier = Modifier.weight(1f), primaryColor = primaryColor, outlineVariant = outlineVariant)
-                            TimeSlotItem("10:30", state = "Disabled", modifier = Modifier.weight(1f), primaryColor = primaryColor, outlineVariant = outlineVariant)
-                            TimeSlotItem("11:00", state = "Selected", modifier = Modifier.weight(1f), primaryColor = primaryColor, outlineVariant = outlineVariant)
-                            TimeSlotItem("11:30", state = "Selected", modifier = Modifier.weight(1f), primaryColor = primaryColor, outlineVariant = outlineVariant)
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                            TimeSlotItem("12:00", state = "Available", modifier = Modifier.weight(1f), primaryColor = primaryColor, outlineVariant = outlineVariant)
-                            TimeSlotItem("12:30", state = "Available", modifier = Modifier.weight(1f), primaryColor = primaryColor, outlineVariant = outlineVariant)
-                            TimeSlotItem("13:00", state = "Available", modifier = Modifier.weight(1f), primaryColor = primaryColor, outlineVariant = outlineVariant)
-                            TimeSlotItem("13:30", state = "Available", modifier = Modifier.weight(1f), primaryColor = primaryColor, outlineVariant = outlineVariant)
-                        }
+                    // YENİ: Başlangıç ve Bitiş Saati Kartları
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        // Başlangıç Saati Butonu
+                        TimeSelectorCard(
+                            title = "Start Time",
+                            time = selectedStartTime ?: "--:--",
+                            onClick = { showStartTimePicker = true },
+                            modifier = Modifier.weight(1f),
+                            primaryColor = primaryColor,
+                            outlineVariant = outlineVariant
+                        )
+
+                        // Bitiş Saati Butonu
+                        TimeSelectorCard(
+                            title = "End Time",
+                            time = selectedEndTime ?: "--:--",
+                            onClick = { showEndTimePicker = true },
+                            modifier = Modifier.weight(1f),
+                            primaryColor = primaryColor,
+                            outlineVariant = outlineVariant
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(24.dp))
@@ -259,9 +446,75 @@ fun StationDetailScreen() {
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(32.dp)) // Alt bar için ekstra boşluk
+                    Spacer(modifier = Modifier.height(32.dp))
                 }
             }
+        }
+    }
+}
+
+// --- YARDIMCI COMPOSABLE'LAR ---
+
+// YENİ: Tekerlekli/Kadranlı Saat Seçici Pop-up
+@RequiresApi(Build.VERSION_CODES.O)
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DialTimePickerModal(
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val currentTime = LocalTime.now()
+    val timePickerState = rememberTimePickerState(
+        initialHour = currentTime.hour,
+        initialMinute = currentTime.minute,
+        is24Hour = true // 24 saat formatı
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val h = timePickerState.hour.toString().padStart(2, '0')
+                val m = timePickerState.minute.toString().padStart(2, '0')
+                onConfirm("$h:$m")
+            }) { Text("Select") }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Material 3 Saat Seçici (Dial Modeli)
+                TimePicker(state = timePickerState)
+            }
+        }
+    )
+}
+
+// YENİ: Şık Saat Seçim Kartları
+@Composable
+fun TimeSelectorCard(title: String, time: String, onClick: () -> Unit, modifier: Modifier = Modifier, primaryColor: Color, outlineVariant: Color) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, outlineVariant),
+        color = Color.White,
+        modifier = modifier.height(72.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp).fillMaxSize(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column {
+                Text(text = title, fontSize = 12.sp, color = Color(0xFF717786))
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(text = time, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = if (time == "--:--") Color.LightGray else primaryColor)
+            }
+            Icon(Icons.Default.AccessTime, contentDescription = null, tint = outlineVariant)
         }
     }
 }
@@ -299,36 +552,6 @@ fun ConnectorItemCard(
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(statusText, fontSize = 12.sp, color = statusColor, fontWeight = FontWeight.Bold)
             }
-        }
-    }
-}
-
-@Composable
-fun TimeSlotItem(time: String, state: String, modifier: Modifier = Modifier, primaryColor: Color, outlineVariant: Color) {
-    val bgColor = when (state) {
-        "Selected" -> primaryColor.copy(alpha = 0.1f)
-        "Disabled" -> outlineVariant.copy(alpha = 0.2f)
-        else -> Color.White
-    }
-    val borderColor = when (state) {
-        "Selected" -> primaryColor
-        "Disabled" -> outlineVariant.copy(alpha = 0.5f)
-        else -> outlineVariant
-    }
-    val textColor = when (state) {
-        "Selected" -> primaryColor
-        "Disabled" -> outlineVariant
-        else -> Color(0xFF181C23)
-    }
-
-    Surface(
-        color = bgColor,
-        shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(if (state == "Selected") 2.dp else 1.dp, borderColor),
-        modifier = modifier.height(40.dp).clickable(enabled = state != "Disabled") { }
-    ) {
-        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-            Text(time, color = textColor, fontWeight = if (state == "Selected") FontWeight.Bold else FontWeight.Normal, fontSize = 14.sp)
         }
     }
 }

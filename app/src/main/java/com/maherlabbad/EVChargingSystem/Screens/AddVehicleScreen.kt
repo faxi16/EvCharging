@@ -26,10 +26,12 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.maherlabbad.EVChargingSystem.Viewmodels.MyVehiclesViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddVehicleScreen(modifier : Modifier = Modifier) {
+fun AddVehicleScreen(modifier : Modifier = Modifier, onVehicleAdded : () -> Unit,back : () -> Unit,myVehiclesViewModel: MyVehiclesViewModel = viewModel()) {
     // --- State Yönetimi ---
     var plateNumber by remember { mutableStateOf("") }
     var model by remember { mutableStateOf("") }
@@ -44,6 +46,10 @@ fun AddVehicleScreen(modifier : Modifier = Modifier) {
     var selectedConnector by remember { mutableStateOf("Type-2") }
     val connectors = listOf("Type-2", "CCS", "CHAdeMO")
 
+    val isLoading by myVehiclesViewModel.isLoading.collectAsState()
+    val isAddSuccess by myVehiclesViewModel.isAddSuccess.collectAsState()
+    val errorMessage by myVehiclesViewModel.errorMessage.collectAsState()
+
     // --- Renk Paleti (HTML'den alındı) ---
     val primaryColor = Color(0xFF0058BC)
     val backgroundColor = Color(0xFFF9F9FF)
@@ -52,13 +58,24 @@ fun AddVehicleScreen(modifier : Modifier = Modifier) {
     val outlineVariant = Color(0xFFC1C6D7)
     val surfaceContainerLowest = Color(0xFFFFFFFF)
 
+    // Başarıyla eklendiğinde sayfayı kapat ve listeye dön
+    LaunchedEffect(isAddSuccess) {
+        if (isAddSuccess) {
+            myVehiclesViewModel.resetSuccessState() // Tekrar tetiklenmemesi için sıfırla
+            onVehicleAdded() // AppNavigation'da nereye yönlendirdiysen oraya gider
+        }
+    }
+
     Scaffold(
         containerColor = backgroundColor,
         topBar = {
             TopAppBar(
+                modifier = Modifier.statusBarsPadding(),
                 title = { },
                 navigationIcon = {
-                    IconButton(onClick = { /* Geri Dönüş Aksiyonu */ }) {
+                    IconButton(onClick = {
+                        back()
+                    }) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Go Back",
@@ -89,24 +106,41 @@ fun AddVehicleScreen(modifier : Modifier = Modifier) {
             ) {
                 Box(modifier = Modifier.padding(16.dp).padding(bottom = 8.dp)) {
                     Button(
-                        onClick = { /* Kaydet Aksiyonu */ },
+                        onClick = {
+                            myVehiclesViewModel.addVehicle(
+                                plateNumber = plateNumber,
+                                brand = selectedBrand,
+                                model = model,
+                                batteryCapacity = batteryCapacity.toDoubleOrNull() ?: 0.0,
+                                connectorType = selectedConnector
+                            )
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(56.dp),
+                        enabled = !isLoading && plateNumber.isNotBlank() && selectedBrand.isNotBlank() && model.isNotBlank() && batteryCapacity.isNotBlank(),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
                     ) {
-                        Row(
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(text = "Save and Continue", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = "Arrow Forward",
-                                modifier = Modifier.size(20.dp)
-                            )
+                        if (isLoading) {
+                            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp))
+                        } else {
+                            Row(
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Save and Continue",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                    contentDescription = "Arrow Forward",
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
                     }
                 }

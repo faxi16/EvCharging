@@ -1,8 +1,15 @@
 package com.maherlabbad.EVChargingSystem.Screens
 
+import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.location.Location
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -14,29 +21,112 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.google.android.gms.maps.model.BitmapDescriptorFactory
+import com.google.android.gms.maps.model.CameraPosition
+import com.google.android.gms.maps.model.LatLng
+import com.google.maps.android.compose.GoogleMap
+import com.google.maps.android.compose.MapProperties
+import com.google.maps.android.compose.MapUiSettings
+import com.google.maps.android.compose.Marker
+import com.google.maps.android.compose.MarkerState
+import com.google.maps.android.compose.rememberCameraPositionState
+import com.maherlabbad.EVChargingSystem.Models.Charger
+import com.maherlabbad.EVChargingSystem.Models.ChargingStation
+import com.maherlabbad.EVChargingSystem.Screen
+import com.maherlabbad.EVChargingSystem.Viewmodels.MapViewModel
+import com.maherlabbad.EVChargingSystem.VoltChargeBottomNavBar
+import androidx.core.net.toUri
+import com.google.android.gms.location.LocationServices
+import com.maherlabbad.EVChargingSystem.ActiveVehicleSession
+import com.maherlabbad.EVChargingSystem.CurrentLocation
 
 @Composable
-fun InteractiveMapScreen() {
+fun InteractiveMapScreen(
+    onNavigateToDetails: (stationId: String) -> Unit,
+    onNavigateToProfile: () -> Unit,
+    onNavigateToWallet: () -> Unit,
+    onNavigateToCharging: () -> Unit,
+    onNavigateToActivity: () -> Unit,
+    viewModel: MapViewModel
+) {
+
+    // İstasyon listesini dinliyoruz
+    val stations by viewModel.filteredStations.collectAsState()
+    val chargers by viewModel.selectedStationChargers.collectAsState()
+    val context = LocalContext.current
+    // ... (Kamera ayarları, UI state'leri vs. aynı kalıyor) ...
+    var selectedStation by remember { mutableStateOf<ChargingStation?>(null) }
+
     // Tema Renkleri (HTML'den eşleştirildi)
     val primaryColor = Color(0xFF0058BC) // VoltCharge Blue
     val primaryContainer = Color(0xFFE0E8FF)
     val secondaryColor = Color(0xFF006E28) // Available (Green)
-    val tertiaryColor = Color(0xFF9E3D00) // Occupied (Yellow/Orange)
-    val errorColor = Color(0xFFBA1A1A) // Offline (Red)
     val surfaceColor = Color(0xFFF9F9FF)
     val onSurfaceVariant = Color(0xFF414755)
     val outlineVariant = Color(0xFFC1C6D7)
+    val izmirLocation = LatLng(38.4237, 27.1428)
+
+    val mapProperties = MapProperties(isMyLocationEnabled = true)
+    val mapUiSettings = MapUiSettings(myLocationButtonEnabled = true, mapToolbarEnabled = false)
+    // Kamera pozisyonunu (Nereye bakılacağını) tutan State
+    val cameraPositionState = rememberCameraPositionState {
+        position = CameraPosition.fromLatLngZoom(izmirLocation, 12f)
+    }
+
+    val lat by CurrentLocation.latitude.collectAsState()
+    val lng by CurrentLocation.longitude.collectAsState()
+    val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
+    val activeVehicleId by ActiveVehicleSession.activeVehicleId.collectAsState()
+
+    val dynamicDistance =
+        calculateDistanceToStation(
+            userLat = lat,
+            userLng = lng,
+            stationLocationStr = selectedStation?.location
+        )
+
+    LaunchedEffect(activeVehicleId) {
+        if(activeVehicleId != null){
+            viewModel.loadStationsAndFilter()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        val hasFinePermission = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val hasCoarsePermission = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+        if (hasFinePermission || hasCoarsePermission) {
+            // Zaten izin verilmişse direkt konumu çek
+            fusedLocationClient.lastLocation.addOnSuccessListener { location ->
+                if (location != null) {
+                    cameraPositionState.position = CameraPosition.fromLatLngZoom(LatLng(location.latitude, location.longitude), 12f)
+                    CurrentLocation.setLocation(
+                        location.latitude,
+                        location.longitude
+                    )
+                }
+            }
+        }
+    }
 
     Scaffold(
         bottomBar = {
-            VoltChargeBottomNavBar(primaryColor)
+            VoltChargeBottomNavBar(
+                currentRoute = Screen.Map.route,
+                onNavigateToMap = { /* Already here */ },
+                onNavigateToCharging = onNavigateToCharging,
+                onNavigateToWallet = onNavigateToWallet,
+                onNavigateToActivity = onNavigateToActivity,
+                onNavigateToProfile = onNavigateToProfile
+            )
         },
         containerColor = Color(0xFFD8D9E5) // Harita yüklenene kadar arkaplan rengi
     ) { paddingValues ->
@@ -45,40 +135,41 @@ fun InteractiveMapScreen() {
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // 1. Harita Arkaplanı (İleride buraya GoogleMap() composable'ı gelecek)
-            // Şimdilik temsili bir grid veya düz renk bırakıyoruz
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0xFFE6E8F3))
+            // 1. Harita Arkaplanı
+            GoogleMap(
+                modifier = Modifier.fillMaxSize(),
+                cameraPositionState = cameraPositionState,
+                properties = mapProperties,
+                uiSettings = mapUiSettings,
+                onMapClick = {
+                    selectedStation = null
+                    viewModel.clearSelectedChargers()
+                }
             ) {
-                // Temsili GPS Noktası (Blue Dot)
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .offset(x = (-20).dp, y = 20.dp)
-                        .size(48.dp)
-                        .background(primaryColor.copy(alpha = 0.2f), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(24.dp)
-                            .background(Color.White, CircleShape)
-                            .border(2.dp, Color.White, CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Box(modifier = Modifier.size(12.dp).background(primaryColor, CircleShape))
+                stations.forEach { mapItem ->
+
+                    // Veritabanındaki location string'ini (örn: "38.4237, 27.1428") LatLng'ye çeviriyoruz
+                    val coordinates = mapItem.station.location.split(",")
+                    if (coordinates.size == 2) {
+                        val lat = coordinates[0].trim().toDoubleOrNull() ?: 0.0
+                        val lng = coordinates[1].trim().toDoubleOrNull() ?: 0.0
+
+                        Marker(
+                            state = MarkerState(position = LatLng(lat,lng)),
+                            title = mapItem.station.name,
+                            icon = BitmapDescriptorFactory.defaultMarker(mapItem.statusColor),
+                            onClick = {
+                                // Pine tıklandığında altta detay kartını göster
+                                selectedStation = mapItem.station
+                                viewModel.fetchChargersForStation(selectedStation?.stationID!!)// Tıklanan istasyonu kaydet (alt kartta göstermek için)
+                                true // true yaparsan kamerayı kendi merkezlemez, false varsayılan davranıştır
+                            }
+                        )
                     }
                 }
-
-                // Temsili İstasyon Pinleri
-                MapPin(modifier = Modifier.align(Alignment.TopCenter).offset(x = (-60).dp, y = 150.dp), color = secondaryColor, icon = Icons.Default.EvStation)
-                MapPin(modifier = Modifier.align(Alignment.CenterEnd).offset(x = (-80).dp, y = (-50).dp), color = tertiaryColor, icon = Icons.Default.EvStation)
-                MapPin(modifier = Modifier.align(Alignment.BottomStart).offset(x = 80.dp, y = (-200).dp), color = errorColor, icon = Icons.Default.EvStation, alpha = 0.7f)
             }
 
-            // 2. Üst Bar (TopAppBar - Glassmorphism hissi)
+            // 2. Üst Bar
             Surface(
                 color = surfaceColor.copy(alpha = 0.9f),
                 modifier = Modifier.fillMaxWidth()
@@ -91,9 +182,6 @@ fun InteractiveMapScreen() {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    IconButton(onClick = { /* Menü */ }) {
-                        Icon(Icons.Default.Menu, contentDescription = "Menu", tint = primaryColor)
-                    }
                     Text(
                         text = "VoltCharge",
                         fontSize = 20.sp,
@@ -101,160 +189,128 @@ fun InteractiveMapScreen() {
                         color = primaryColor,
                         letterSpacing = (-0.5).sp
                     )
-                    // Kullanıcı Profili Placeholder
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .background(primaryContainer, CircleShape)
-                            .clip(CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Default.Person, contentDescription = "Profile", tint = primaryColor, modifier = Modifier.size(20.dp))
-                    }
                 }
             }
-
-            // 3. Yüzen Arama Çubuğu ve Filtre (Floating Search & Filter)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 80.dp, start = 16.dp, end = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
+            selectedStation?.let { it1 ->
                 Surface(
-                    shape = RoundedCornerShape(50),
+                    shape = RoundedCornerShape(24.dp),
                     color = surfaceColor,
-                    shadowElevation = 4.dp,
+                    shadowElevation = 12.dp,
                     border = BorderStroke(1.dp, outlineVariant),
                     modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp)
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = 16.dp)
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.Search, contentDescription = "Search", tint = onSurfaceVariant)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Search destinations, stations...", color = outlineVariant, fontSize = 16.sp)
-                    }
-                }
-
-                Surface(
-                    shape = CircleShape,
-                    color = surfaceColor,
-                    shadowElevation = 4.dp,
-                    border = BorderStroke(1.dp, outlineVariant),
-                    modifier = Modifier.size(48.dp)
-                ) {
-                    IconButton(onClick = { /* Filtre */ }) {
-                        Icon(Icons.Default.Tune, contentDescription = "Filter", tint = onSurfaceVariant)
-                    }
-                }
-            }
-
-            // 4. Yüzen Aksiyon Butonları (Sağ Alt - Harita Kontrolleri)
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 16.dp, bottom = 220.dp), // Kartın üstünde kalması için
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FloatingActionButton(
-                    onClick = { /* Katmanlar */ },
-                    containerColor = surfaceColor,
-                    contentColor = onSurfaceVariant,
-                    modifier = Modifier.size(48.dp)
-                ) {
-                    Icon(Icons.Default.Layers, contentDescription = "Layers")
-                }
-                FloatingActionButton(
-                    onClick = { /* Konumuma Git */ },
-                    containerColor = surfaceColor,
-                    contentColor = primaryColor,
-                    modifier = Modifier.size(48.dp)
-                ) {
-                    Icon(Icons.Default.MyLocation, contentDescription = "My Location")
-                }
-            }
-
-            // 5. İstasyon Özet Kartı (Bottom Sheet - Floating)
-            Surface(
-                shape = RoundedCornerShape(24.dp),
-                color = surfaceColor,
-                shadowElevation = 12.dp,
-                border = BorderStroke(1.dp, outlineVariant),
-                modifier = Modifier
-                    .padding(horizontal = 16.dp)
-                    .padding(bottom = 16.dp)
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    // Drag Handle
-                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        Box(modifier = Modifier.width(40.dp).height(4.dp).background(outlineVariant, RoundedCornerShape(50)))
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // İstasyon Başlığı ve Mesafe
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Column {
-                            Text("VoltCharge Plaza", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
-                                Box(modifier = Modifier.size(8.dp).background(secondaryColor, CircleShape))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Available • 24/7", fontSize = 14.sp, color = onSurfaceVariant)
-                            }
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = primaryContainer,
-                            modifier = Modifier.height(32.dp)
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Box(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                            Box(
+                                modifier = Modifier.width(40.dp).height(4.dp)
+                                    .background(outlineVariant, RoundedCornerShape(50))
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column {
+                                Text(
+                                    selectedStation?.name.toString(),
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier.size(8.dp)
+                                            .background(secondaryColor, CircleShape)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        "Working Hours • ${selectedStation?.operatingHours}",
+                                        fontSize = 14.sp,
+                                        color = onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = primaryContainer,
+                                modifier = Modifier.height(32.dp)
                             ) {
-                                Icon(Icons.Default.DirectionsCar, contentDescription = null, tint = primaryColor, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("1.2 mi", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Default.DirectionsCar,
+                                        contentDescription = null,
+                                        tint = primaryColor,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(dynamicDistance, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
-                    }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
 
-                    // Konektörler (Yatay Kaydırılabilir)
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        ConnectorCard(kw = "150kW", status = "4/6 OPEN", tint = secondaryColor, active = true)
-                        ConnectorCard(kw = "50kW", status = "0/2 OPEN", tint = onSurfaceVariant, active = false)
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // Aksiyon Butonları
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        OutlinedButton(
-                            onClick = { /* Detaylar */ },
-                            modifier = Modifier.weight(1f).height(48.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = onSurfaceVariant)
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Text("Details", fontWeight = FontWeight.SemiBold)
+                            chargers.forEach {
+                                ConnectorCard(charger = it)
+                            }
                         }
-                        Button(
-                            onClick = { /* Rota Oluştur */ },
-                            modifier = Modifier.weight(2f).height(48.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
-                        ) {
-                            Icon(Icons.Default.Directions, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Create Route", fontWeight = FontWeight.SemiBold)
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            OutlinedButton(
+                                onClick = { onNavigateToDetails(selectedStation?.stationID.toString()) },
+                                modifier = Modifier.weight(1f).height(48.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = onSurfaceVariant)
+                            ) {
+                                Text("Details", fontWeight = FontWeight.SemiBold)
+                            }
+                            Button(
+                                onClick = {
+                                    val coordinates = it1.location.split(",")
+                                    if (coordinates.size == 2) {
+                                        val lat = coordinates[0].trim().toDoubleOrNull() ?: 0.0
+                                        val lng = coordinates[1].trim().toDoubleOrNull() ?: 0.0
+                                        val uri = "google.navigation:q=${lat},${lng}&mode=d".toUri() // mode=d (Driving)
+                                        val intent = Intent(Intent.ACTION_VIEW, uri)
+                                        intent.setPackage("com.google.android.apps.maps")
+                                        // Eğer telefonda maps yoksa çökmesin diye kontrol
+                                        if (intent.resolveActivity(context.packageManager) != null) {
+                                            context.startActivity(intent)
+                                        } else {
+                                            // Maps yoksa tarayıcıdan aç
+                                            context.startActivity(Intent(Intent.ACTION_VIEW,
+                                                "https://maps.google.com/?daddr=${lat},${lng}".toUri()))
+                                        }
+                                    }
+
+                                },
+                                modifier = Modifier.weight(2f).height(48.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
+                            ) {
+                                Icon(Icons.Default.Directions, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Create Route", fontWeight = FontWeight.SemiBold)
+                            }
                         }
                     }
                 }
@@ -264,88 +320,141 @@ fun InteractiveMapScreen() {
 }
 
 @Composable
-fun MapPin(modifier: Modifier = Modifier, color: Color, icon: ImageVector, alpha: Float = 1f) {
-    Box(modifier = modifier.alpha(alpha), contentAlignment = Alignment.TopCenter) {
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .background(color, CircleShape)
-                .border(2.dp, Color.White, CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
-        }
-    }
-}
+fun ConnectorCard(charger: Charger) {
 
-@Composable
-fun ConnectorCard(kw: String, status: String, tint: Color, active: Boolean) {
+    // 1. Statüye (Status) göre renk ve aktiflik durumu
+    val isAvailable = charger.status.equals("Available", ignoreCase = true)
+    val tintColor = if (isAvailable) Color(0xFF006E28) else Color(0xFFBA1A1A) // Yeşil veya Kırmızı
+    val backgroundColor = if (isAvailable) Color(0xFFECEDF9) else Color(0xFFF9F9FF)
+    val borderColor = if (isAvailable) tintColor.copy(alpha = 0.5f) else Color(0xFFC1C6D7)
+
+    // 2. Güç Çıktısı (PowerOutput) formatlaması (Örn: 150.0 -> 150 kW)
+    val formattedPower = if (charger.powerOutput % 1.0 == 0.0) {
+        "${charger.powerOutput.toInt()} kW"
+    } else {
+        "${charger.powerOutput} kW"
+    }
+
+    // 3. Ekranda çok uzun durmaması için UUID'lerin ilk 6 hanesini alıyoruz (ChargerID ve StationID)
+    val shortChargerId = charger.chargerID.take(6).uppercase()
+    val shortStationId = charger.stationID.take(4).uppercase()
+
     Surface(
-        shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, if (active) tint.copy(alpha = 0.5f) else Color(0xFFC1C6D7)),
-        color = if (active) Color(0xFFECEDF9) else Color(0xFFF9F9FF),
-        modifier = Modifier.width(130.dp)
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, borderColor),
+        color = backgroundColor,
+        modifier = Modifier.width(160.dp) // Daha fazla bilgi için biraz genişlettik
     ) {
-        Row(
+        Column(
             modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Icon(Icons.Default.EvStation, contentDescription = null, tint = tint)
-            Spacer(modifier = Modifier.width(8.dp))
-            Column {
-                Text(kw, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                Text(status, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = tint)
+
+            // --- ÜST KISIM: Güç (PowerOutput) ve Tip (Type) ---
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = formattedPower,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF1A1C20)
+                )
+
+                // AC / DC Rozeti (Badge)
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = if (charger.type == "DC") Color(0xFFFFD54F) else Color(0xFF90CAF9),
+                ) {
+                    Text(
+                        text = charger.type, // "DC" veya "AC"
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Black,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            // --- ORTA KISIM: Konektör (ConnectorType) ve Fiyat (UnitPrice) ---
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.EvStation, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.DarkGray)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = charger.connectorType, // Örn: "CCS", "Type-2"
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Payments, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.DarkGray)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "₺${charger.unitPrice} / kWh", // Örn: "₺8.50 / kWh"
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.DarkGray
+                    )
+                }
+            }
+
+            Divider(color = borderColor.copy(alpha = 0.4f), modifier = Modifier.padding(vertical = 2.dp))
+
+            // --- ALT KISIM: Statü (Status) ve ID'ler (ChargerID, StationID) ---
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = charger.status.uppercase(), // "AVAILABLE", "IN USE"
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = tintColor
+                )
+
+                // Gerçek hayattaki gibi cihazın üzerinde yazan seri no mantığı
+                Text(
+                    text = "#$shortChargerId-$shortStationId",
+                    fontSize = 9.sp,
+                    color = Color.Gray,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }
 }
 
-@Composable
-fun VoltChargeBottomNavBar(primaryColor: Color) {
-    Surface(
-        shadowElevation = 16.dp,
-        color = Color.White.copy(alpha = 0.95f)
-    ) {
-        NavigationBar(
-            containerColor = Color.Transparent,
-            tonalElevation = 0.dp,
-            modifier = Modifier.height(72.dp)
-        ) {
-            NavigationBarItem(
-                selected = true,
-                onClick = { },
-                icon = { Icon(Icons.Default.Map, contentDescription = "Map") },
-                label = { Text("Map", fontWeight = FontWeight.Bold) },
-                colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = primaryColor,
-                    selectedTextColor = primaryColor,
-                    indicatorColor = primaryColor.copy(alpha = 0.1f)
-                )
-            )
-            NavigationBarItem(
-                selected = false,
-                onClick = { },
-                icon = { Icon(Icons.Default.EvStation, contentDescription = "Charging") },
-                label = { Text("Charging") }
-            )
-            NavigationBarItem(
-                selected = false,
-                onClick = { },
-                icon = { Icon(Icons.Default.AccountBalanceWallet, contentDescription = "Wallet") },
-                label = { Text("Wallet") }
-            )
-            NavigationBarItem(
-                selected = false,
-                onClick = { },
-                icon = { Icon(Icons.Default.History, contentDescription = "Activity") },
-                label = { Text("Activity") }
-            )
-            NavigationBarItem(
-                selected = false,
-                onClick = { },
-                icon = { Icon(Icons.Default.Person, contentDescription = "Profile") },
-                label = { Text("Profile") }
-            )
+
+@SuppressLint("DefaultLocale")
+fun calculateDistanceToStation(userLat: Double, userLng: Double, stationLocationStr: String?): String {
+    if (stationLocationStr.isNullOrBlank()) return "-- km away"
+
+    return try {
+        // "38.432, 27.142" formatındaki stringi virgülünden ikiye bölüyoruz
+        val parts = stationLocationStr.split(",")
+        if (parts.size == 2) {
+            val stationLat = parts[0].trim().toDouble()
+            val stationLng = parts[1].trim().toDouble()
+
+            // Android'in mesafe hesaplama aracı
+            val results = FloatArray(1)
+            Location.distanceBetween(userLat, userLng, stationLat, stationLng, results)
+
+            val distanceInMeters = results[0]
+            val distanceInKm = distanceInMeters / 1000f
+
+            // Formatlama: "2.4 km away"
+            String.format("%.1f km away", distanceInKm)
+        } else {
+            "-- km away"
         }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        "-- km away" // Parse hatası olursa (örneğin koordinat yerine "Alsancak" yazılmışsa)
     }
 }

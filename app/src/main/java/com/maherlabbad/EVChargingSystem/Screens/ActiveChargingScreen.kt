@@ -1,5 +1,7 @@
 package com.maherlabbad.EVChargingSystem.Screens
 
+import android.os.Build
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -10,7 +12,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -19,14 +21,43 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.maherlabbad.EVChargingSystem.Screen
+import com.maherlabbad.EVChargingSystem.Viewmodels.ActiveChargingViewModel
+import com.maherlabbad.EVChargingSystem.Viewmodels.ChargingState
+import com.maherlabbad.EVChargingSystem.VoltChargeBottomNavBar
+import java.util.Locale
 
+@RequiresApi(Build.VERSION_CODES.O)
 @Composable
-fun ActiveChargingScreen() {
+fun ActiveChargingScreen(
+    onNavigateToMap: () -> Unit,
+    onNavigateToWallet: () -> Unit,
+    onNavigateToActivity: () -> Unit,
+    onNavigateToProfile: () -> Unit,
+    chargingViewModel: ActiveChargingViewModel
+) {
+    // --- ViewModel State'lerini Dinle ---
+    val chargingState by chargingViewModel.chargingState.collectAsState()
+    val batteryPercentage by chargingViewModel.batteryPercentage.collectAsState()
+    val currentSession by chargingViewModel.currentSession.collectAsState()
+    val addedKwh by chargingViewModel.addedKwh.collectAsState()
+    val currentCost by chargingViewModel.currentCost.collectAsState()
+    val elapsedTimeSeconds by chargingViewModel.elapsedTimeSeconds.collectAsState()
+    val errorMessage by chargingViewModel.errorMessage.collectAsState()
+    val isQrVerified by chargingViewModel.isQrVerified.collectAsState()
+    val isCablePlugged by chargingViewModel.isCablePlugged.collectAsState()
+    val hasActiveReservation by chargingViewModel.hasActiveReservation.collectAsState()
+    val isLoading by chargingViewModel.isLoading.collectAsState()
+    
+    // Faz 1 & 2: Dinamik Değerler
+    val unitPrice by chargingViewModel.activeChargerUnitPrice.collectAsState()
+    val userBalance by chargingViewModel.userBalance.collectAsState()
+
     // --- Renk Paleti ---
     val primaryColor = Color(0xFF0058BC)
-    val primaryContainer = Color(0xFF0070EB)
     val primaryFixedDim = Color(0xFFADC6FF)
     val secondaryColor = Color(0xFF006E28) // Yeşil - Şarj aktif
     val secondaryContainer = Color(0xFF6FFB85)
@@ -41,13 +72,16 @@ fun ActiveChargingScreen() {
     val onSurface = Color(0xFF181C23)
     val onSurfaceVariant = Color(0xFF414755)
 
+    LaunchedEffect(Unit) {
+        chargingViewModel.loadActiveReservationAndSession()
+    }
+
     Scaffold(
         containerColor = surfaceColor,
         topBar = {
-            // Şeffaf, ortası rozetli Top Bar
             Surface(
                 color = surfaceContainerLowest.copy(alpha = 0.9f),
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().statusBarsPadding(),
                 shadowElevation = 1.dp
             ) {
                 Row(
@@ -58,16 +92,6 @@ fun ActiveChargingScreen() {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    IconButton(
-                        onClick = { /* Küçült */ },
-                        modifier = Modifier
-                            .size(40.dp)
-                            .background(surfaceContainerLow, CircleShape)
-                    ) {
-                        Icon(Icons.Default.ExpandMore, contentDescription = "Minimize", tint = onSurface)
-                    }
-
-                    // Charging Pill (Rozet)
                     Surface(
                         shape = RoundedCornerShape(50),
                         color = secondaryContainer.copy(alpha = 0.2f),
@@ -79,45 +103,30 @@ fun ActiveChargingScreen() {
                         ) {
                             Icon(Icons.Default.Bolt, contentDescription = null, tint = secondaryColor, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Charging...", color = secondaryColor, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                            val statusLabel = if(chargingState == ChargingState.CHARGING) "Charging..." else "Ready"
+                            Text(statusLabel, color = secondaryColor, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                         }
                     }
-
-                    IconButton(onClick = { /* Menü */ }) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "Options", tint = outline)
-                    }
+                    
+                    // Bakiyeyi sağ üstte göster
+                    Text(
+                        text = "Balance: ₺${String.format(Locale.US, "%.2f", userBalance)}",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = onSurfaceVariant
+                    )
                 }
             }
         },
         bottomBar = {
-            // Yüzen gradient arkaplanlı Durdurma Butonu
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(Color.Transparent, surfaceColor, surfaceColor)
-                        )
-                    )
-                    .padding(16.dp)
-                    .padding(bottom = 16.dp)
-            ) {
-                Button(
-                    onClick = { /* Şarjı Bitir (FR14) */ },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = errorColor,
-                        contentColor = Color.White
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(64.dp),
-                    shape = RoundedCornerShape(50)
-                ) {
-                    Icon(Icons.Default.StopCircle, contentDescription = null, modifier = Modifier.size(24.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Stop Charging", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                }
-            }
+            VoltChargeBottomNavBar(
+                currentRoute = Screen.ActiveCharging.route,
+                onNavigateToMap = onNavigateToMap,
+                onNavigateToCharging = { /* Already here */ },
+                onNavigateToWallet = onNavigateToWallet,
+                onNavigateToActivity = onNavigateToActivity,
+                onNavigateToProfile = onNavigateToProfile
+            )
         }
     ) { paddingValues ->
         Column(
@@ -129,6 +138,20 @@ fun ActiveChargingScreen() {
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(modifier = Modifier.height(16.dp))
+            if (!errorMessage.isNullOrEmpty()) {
+                Surface(
+                    color = errorColor.copy(alpha = 0.1f),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+                ) {
+                    Text(
+                        text = errorMessage ?: "",
+                        color = errorColor,
+                        modifier = Modifier.padding(16.dp),
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
 
             // 1. Dairesel Şarj Göstergesi
             Surface(
@@ -141,11 +164,9 @@ fun ActiveChargingScreen() {
                     .height(280.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    // Dairesel Progress Çizimi (Canvas)
-                    val progress = 0.78f // %78
+                    val progress = batteryPercentage / 100f
                     Box(modifier = Modifier.size(200.dp), contentAlignment = Alignment.Center) {
                         androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
-                            // Arka plan çemberi (Gri)
                             drawArc(
                                 color = surfaceVariant,
                                 startAngle = 0f,
@@ -153,23 +174,21 @@ fun ActiveChargingScreen() {
                                 useCenter = false,
                                 style = Stroke(width = 16.dp.toPx(), cap = StrokeCap.Round)
                             )
-                            // İlerleme çemberi (Yeşil)
                             drawArc(
-                                color = secondaryColor,
+                                color = if (chargingState == ChargingState.CHARGING) secondaryColor else outlineVariant,
                                 startAngle = -90f,
                                 sweepAngle = 360f * progress,
                                 useCenter = false,
                                 style = Stroke(width = 16.dp.toPx(), cap = StrokeCap.Round)
                             )
                         }
-                        // İç Metinler
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("78%", fontSize = 48.sp, fontWeight = FontWeight.Bold, color = onSurface)
-                            Text("64 kW output", fontSize = 14.sp, color = onSurfaceVariant)
+                            Text("${batteryPercentage}%", fontSize = 48.sp, fontWeight = FontWeight.Bold, color = onSurface)
+                            val statusText = if (chargingState == ChargingState.CHARGING) "64 kW output" else "Not Charging"
+                            Text(statusText, fontSize = 14.sp, color = onSurfaceVariant)
                         }
                     }
 
-                    // Alt İstasyon Durum Rozeti
                     Surface(
                         shape = RoundedCornerShape(50),
                         color = surfaceContainerLow,
@@ -182,9 +201,17 @@ fun ActiveChargingScreen() {
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Box(modifier = Modifier.size(8.dp).background(secondaryColor, CircleShape))
+                            val statusColor = if (chargingState == ChargingState.CHARGING) secondaryColor else outlineVariant
+                            Box(modifier = Modifier.size(8.dp).background(statusColor, CircleShape))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("STATION DC-04 ACTIVE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = onSurfaceVariant)
+                            val statusText = if (chargingState == ChargingState.CHARGING) "ACTIVE" else "READY"
+                            val displayId = currentSession?.reservationID?.take(6)?.uppercase() ?: "UNKNOWN"
+                            Text(
+                                text = "RES-$displayId $statusText",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = onSurfaceVariant
+                            )
                         }
                     }
                 }
@@ -192,7 +219,7 @@ fun ActiveChargingScreen() {
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // 2. İstatistik Kartları (Energy & Time)
+            // 2. İstatistik Kartları (Energy & Unit Price)
             Surface(
                 shape = RoundedCornerShape(16.dp),
                 color = surfaceContainerLowest,
@@ -203,12 +230,11 @@ fun ActiveChargingScreen() {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(IntrinsicSize.Min) // Dikey çizginin tam boy olmasını sağlar
+                        .height(IntrinsicSize.Min)
                         .padding(16.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Sol Taraf: Tüketilen Enerji
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                         Box(
                             modifier = Modifier
@@ -221,37 +247,41 @@ fun ActiveChargingScreen() {
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text("Energy Delivered", fontSize = 12.sp, color = outline)
-                            Text("32.4 kWh", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = onSurface)
+                            Text("${addedKwh} kWh", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = onSurface)
                         }
                     }
 
-                    // Orta Çizgi
                     Box(modifier = Modifier.width(1.dp).fillMaxHeight().background(outlineVariant.copy(alpha = 0.3f)))
 
-                    // Sağ Taraf: Kalan Süre
                     Column(horizontalAlignment = Alignment.End, modifier = Modifier.weight(1f)) {
-                        Text("Est. Time Left", fontSize = 12.sp, color = outline)
-                        Text("1h 15m", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = onSurface)
+                        Text("Unit Price", fontSize = 12.sp, color = outline)
+                        Text("₺${String.format(Locale.US, "%.2f", unitPrice)}/kWh", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = onSurface)
                     }
                 }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // 3. Canlı Maliyet (Live Cost)
+            // 3. Canlı Maliyet (Live Cost) & Faz 2: Circuit Breaker UI
+            val balanceRatio = if (userBalance > 0) (currentCost / userBalance).toFloat() else 0f
+            val isWarning = balanceRatio >= 0.9f
+            
             Surface(
                 shape = RoundedCornerShape(16.dp),
                 color = surfaceContainerLowest,
-                border = BorderStroke(1.dp, outlineVariant.copy(alpha = 0.2f)),
-                shadowElevation = 1.dp,
+                border = BorderStroke(
+                    width = if (isWarning) 2.dp else 1.dp,
+                    color = if (isWarning) errorColor else outlineVariant.copy(alpha = 0.2f)
+                ),
+                shadowElevation = if (isWarning) 4.dp else 1.dp,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Box(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(
                             Brush.linearGradient(
-                                colors = listOf(surfaceContainerLowest, surfaceContainerLow)
+                                colors = listOf(surfaceContainerLowest, if (isWarning) errorColor.copy(alpha = 0.05f) else surfaceContainerLow)
                             )
                         )
                         .padding(16.dp)
@@ -265,22 +295,68 @@ fun ActiveChargingScreen() {
                             Box(
                                 modifier = Modifier
                                     .size(40.dp)
-                                    .background(surfaceVariant, CircleShape),
+                                    .background(if (isWarning) errorColor.copy(alpha = 0.1f) else surfaceVariant, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Default.Payments, contentDescription = null, tint = onSurfaceVariant)
+                                Icon(
+                                    Icons.Default.Payments, 
+                                    contentDescription = null, 
+                                    tint = if (isWarning) errorColor else onSurfaceVariant
+                                )
                             }
                             Spacer(modifier = Modifier.width(12.dp))
                             Text("Live Cost", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = onSurface)
                         }
-                        Text("₺14.80", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = onSurface)
+                        Text("₺${String.format(Locale.US, "%.2f", currentCost)}", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = if (isWarning) errorColor else onSurface)
+                    }
+                    
+                    if (chargingState == ChargingState.CHARGING) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        // Faz 2: LinearProgressIndicator (Harcanan paranın toplam bakiyeye oranı)
+                        LinearProgressIndicator(
+                            progress = { balanceRatio.coerceIn(0f, 1f) },
+                            modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
+                            color = if (isWarning) errorColor else primaryColor,
+                            trackColor = outlineVariant.copy(alpha = 0.2f),
+                        )
+                        
+                        if (isWarning) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Warning: Approaching balance limit!",
+                                color = errorColor,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.align(Alignment.CenterHorizontally)
+                            )
+                        }
                     }
                 }
             }
 
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Button(
+                onClick = {
+                    chargingViewModel.stopChargingAndPay()
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = errorColor,
+                    contentColor = Color.White
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(64.dp),
+                shape = RoundedCornerShape(50),
+                enabled = chargingState == ChargingState.CHARGING,
+            ) {
+                Icon(Icons.Default.StopCircle, contentDescription = null, modifier = Modifier.size(24.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Stop Charging", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            }
+
             Spacer(modifier = Modifier.height(24.dp))
 
-            // 4. İstasyon Aksiyonları Ayracı
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Box(modifier = Modifier.weight(1f).height(1.dp).background(outlineVariant.copy(alpha = 0.3f)))
                 Text("STATION ACTIONS", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = outline, modifier = Modifier.padding(horizontal = 12.dp))
@@ -289,13 +365,12 @@ fun ActiveChargingScreen() {
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // 5. Aksiyon Butonları (Grid Yapısı)
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                // QR Kod Tarayıcı (Tam Genişlik)
                 Surface(
-                    onClick = { /* QR Kod Okuyucu Aç */ },
+                    onClick = { chargingViewModel.verifyQrCode() },
                     shape = RoundedCornerShape(16.dp),
-                    color = primaryColor,
+                    color = if (isQrVerified) secondaryColor else primaryColor,
+                    enabled = hasActiveReservation && !isQrVerified && chargingState == ChargingState.IDLE,
                     modifier = Modifier.fillMaxWidth().height(80.dp),
                     shadowElevation = 4.dp
                 ) {
@@ -309,26 +384,42 @@ fun ActiveChargingScreen() {
                                 modifier = Modifier.size(48.dp).background(Color.White.copy(alpha = 0.2f), RoundedCornerShape(12.dp)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Default.QrCodeScanner, contentDescription = null, tint = Color.White, modifier = Modifier.size(28.dp))
+                                Icon(
+                                    imageVector = if (isQrVerified) Icons.Default.CheckCircle else Icons.Default.QrCodeScanner,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(28.dp)
+                                )
                             }
                             Spacer(modifier = Modifier.width(16.dp))
                             Column {
-                                Text("Scan QR Code", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-                                Text("Identify new station", fontSize = 14.sp, color = primaryFixedDim)
+                                Text(
+                                    text = if (isQrVerified) "QR Verified" else "Scan QR Code",
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.White
+                                )
+                                Text(
+                                    text = if (isQrVerified) "Station confirmed" else "Identify station",
+                                    fontSize = 14.sp,
+                                    color = if (isQrVerified) secondaryContainer else primaryFixedDim
+                                )
                             }
                         }
-                        Icon(Icons.Default.ArrowForward, contentDescription = null, tint = primaryFixedDim)
+                        if (!isQrVerified) {
+                            Icon(Icons.Default.ArrowForward, contentDescription = null, tint = primaryFixedDim)
+                        }
                     }
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    // Kabloyu Tak (Yarı Genişlik)
                     Surface(
-                        onClick = { /* Handshake Simülasyonu */ },
+                        onClick = { chargingViewModel.plugCable() },
                         shape = RoundedCornerShape(16.dp),
-                        color = surfaceContainerLowest,
-                        border = BorderStroke(1.dp, outlineVariant.copy(alpha = 0.4f)),
-                        modifier = Modifier.weight(1f).height(110.dp)
+                        color = if (isCablePlugged) secondaryColor.copy(alpha = 0.1f) else surfaceContainerLowest,
+                        border = BorderStroke(1.dp, if (isCablePlugged) secondaryColor else outlineVariant.copy(alpha = 0.4f)),
+                        modifier = Modifier.weight(1f).height(110.dp),
+                        enabled = hasActiveReservation && isQrVerified && !isCablePlugged && chargingState == ChargingState.IDLE
                     ) {
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
@@ -336,23 +427,36 @@ fun ActiveChargingScreen() {
                             modifier = Modifier.fillMaxSize()
                         ) {
                             Box(
-                                modifier = Modifier.size(48.dp).background(surfaceContainer, CircleShape),
+                                modifier = Modifier.size(48.dp).background(if (isCablePlugged) secondaryColor else surfaceContainer, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Default.Handshake, contentDescription = null, tint = onSurfaceVariant, modifier = Modifier.size(24.dp))
+                                Icon(
+                                    imageVector = Icons.Default.Cable,
+                                    contentDescription = null,
+                                    tint = if (isCablePlugged) Color.White else onSurfaceVariant,
+                                    modifier = Modifier.size(24.dp)
+                                )
                             }
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text("Plug in Cable", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = onSurface)
+                            Text(
+                                text = if (isCablePlugged) "Cable Plugged" else "Plug in Cable",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (isCablePlugged) secondaryColor else onSurface
+                            )
                         }
                     }
 
-                    // Şarjı Başlat (Yarı Genişlik)
+                    // Faz 2: Başlatma Engeli (Bakiye < 50 TL)
+                    val canStart = isQrVerified && isCablePlugged && userBalance >= 50.0
+
                     Surface(
-                        onClick = { /* Şarjı Başlat */ },
+                        onClick = { chargingViewModel.startCharging() },
                         shape = RoundedCornerShape(16.dp),
-                        color = surfaceContainerLowest,
+                        color = if (canStart) primaryColor else surfaceContainerLowest,
                         border = BorderStroke(1.dp, outlineVariant.copy(alpha = 0.4f)),
-                        modifier = Modifier.weight(1f).height(110.dp)
+                        modifier = Modifier.weight(1f).height(110.dp),
+                        enabled = canStart && chargingState == ChargingState.IDLE,
                     ) {
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
@@ -360,19 +464,29 @@ fun ActiveChargingScreen() {
                             modifier = Modifier.fillMaxSize()
                         ) {
                             Box(
-                                modifier = Modifier.size(48.dp).background(surfaceContainer, CircleShape),
+                                modifier = Modifier.size(48.dp).background(if (canStart) Color.White.copy(alpha = 0.2f) else surfaceContainer, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Default.Power, contentDescription = null, tint = onSurfaceVariant, modifier = Modifier.size(24.dp))
+                                Icon(
+                                    imageVector = Icons.Default.Power,
+                                    contentDescription = null,
+                                    tint = if (canStart) Color.White else outlineVariant,
+                                    modifier = Modifier.size(24.dp)
+                                )
                             }
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text("Start Charging", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = onSurface)
+                            Text(
+                                text = if (userBalance < 50.0 && isCablePlugged) "Low Balance" else "Start Charging",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (canStart) Color.White else outlineVariant,
+                                textAlign = TextAlign.Center
+                            )
                         }
                     }
                 }
             }
-
-            Spacer(modifier = Modifier.height(120.dp)) // Alttaki durdurma butonu içeriği kapatmasın diye
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }

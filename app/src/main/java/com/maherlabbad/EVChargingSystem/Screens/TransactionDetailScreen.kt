@@ -1,5 +1,7 @@
 package com.maherlabbad.EVChargingSystem.Screens
 
+import android.os.Build
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -14,6 +16,9 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -24,9 +29,29 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.maherlabbad.EVChargingSystem.Viewmodels.TransactionDetailsViewModel
+import java.time.OffsetDateTime
+import java.time.format.DateTimeFormatter
+import kotlin.math.abs
 
+@RequiresApi(Build.VERSION_CODES.O)
 @Composable
-fun TransactionDetailsScreen() {
+fun TransactionDetailsScreen(
+    transactionId: String,
+    onBack : () -> Unit,
+    viewModel: TransactionDetailsViewModel = viewModel()
+) {
+    // ViewModel State'lerini dinle
+    val transaction by viewModel.transaction.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val errorMessage by viewModel.errorMessage.collectAsState()
+
+    // Ekran açıldığında veriyi çek
+    LaunchedEffect(transactionId) {
+        viewModel.loadTransactionDetails(transactionId)
+    }
+
     // --- Renk Paleti ---
     val primaryColor = Color(0xFF0058BC)
     val secondaryContainer = Color(0xFFD7FFDF)
@@ -45,7 +70,7 @@ fun TransactionDetailsScreen() {
             // Şeffaf Gölgeli TopAppBar
             Surface(
                 color = surfaceContainerLowest.copy(alpha = 0.9f),
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().statusBarsPadding(),
                 shadowElevation = 2.dp
             ) {
                 Row(
@@ -55,7 +80,7 @@ fun TransactionDetailsScreen() {
                         .padding(horizontal = 16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = { /* Geri Dön */ }) {
+                    IconButton(onClick = { onBack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = onSurface)
                     }
                     Text(
@@ -112,6 +137,7 @@ fun TransactionDetailsScreen() {
             }
         }
     ) { paddingValues ->
+        // Dijital Fatura Kartı
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -122,89 +148,137 @@ fun TransactionDetailsScreen() {
         ) {
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Dijital Fatura Kartı
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = surfaceContainerLowest,
-                border = BorderStroke(1.dp, outlineVariant.copy(alpha = 0.5f)),
-                shadowElevation = 2.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column {
-                    // Üst Mavi Dekoratif Çizgi
-                    Box(modifier = Modifier.fillMaxWidth().height(8.dp).background(primaryColor))
+            if (isLoading) {
+                CircularProgressIndicator(color = primaryColor)
+            } else if (!errorMessage.isNullOrEmpty()) {
+                Text(text = errorMessage ?: "", color = Color.Red)
+            } else if (transaction != null) {
+                val tx = transaction!!
 
-                    // Başlık (Success & Amount)
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.fillMaxWidth().padding(24.dp)
-                    ) {
+                // Tarihi ve Saati Ayır (OffsetDateTime parse)
+                var dateStr = ""
+                var timeStr = ""
+                try {
+                    val parsedDate = OffsetDateTime.parse(tx.timestamp)
+                    dateStr = parsedDate.format(DateTimeFormatter.ofPattern("dd MMM yyyy"))
+                    timeStr = parsedDate.format(DateTimeFormatter.ofPattern("HH:mm"))
+                } catch (e: Exception) {
+                    dateStr = tx.timestamp // Hata olursa ham metni göster
+                }
+
+                // Türüne göre Başlık belirle
+                val isTopUp = tx.type.equals("TopUp", ignoreCase = true)
+                val displayTitle = if (isTopUp) "WALLET TOP-UP" else "CHARGING RECEIPT"
+                val displayAmount = abs(tx.amount) // -12.50 olsa bile fişte 12.50 görünür
+
+                // Dijital Fatura Kartı
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = surfaceContainerLowest,
+                    border = BorderStroke(1.dp, outlineVariant.copy(alpha = 0.5f)),
+                    shadowElevation = 2.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column {
+                        // Üst Mavi Dekoratif Çizgi
                         Box(
-                            modifier = Modifier.size(64.dp).background(secondaryContainer, CircleShape),
-                            contentAlignment = Alignment.Center
+                            modifier = Modifier.fillMaxWidth().height(8.dp)
+                                .background(primaryColor)
+                        )
+
+                        // Başlık (Success & Amount)
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.fillMaxWidth().padding(24.dp)
                         ) {
-                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = onSecondaryContainer, modifier = Modifier.size(32.dp))
+                            Box(
+                                modifier = Modifier.size(64.dp)
+                                    .background(secondaryContainer, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = onSecondaryContainer,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = "PAYMENT SUCCESSFUL",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = onSurfaceVariant,
+                                letterSpacing = 1.sp
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "₺${displayAmount}",
+                                fontSize = 36.sp,
+                                fontWeight = FontWeight.Black,
+                                color = onSurface
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = displayTitle,
+                                fontSize = 14.sp,
+                                color = outline
+                            )
                         }
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = "PAYMENT SUCCESSFUL",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = onSurfaceVariant,
-                            letterSpacing = 1.sp
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "₺12.50",
-                            fontSize = 36.sp,
-                            fontWeight = FontWeight.Black,
-                            color = onSurface
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "VoltCharge Plaza",
-                            fontSize = 14.sp,
-                            color = outline
-                        )
-                    }
 
-                    // Kesik Çizgi Ayracı
-                    DashedDivider(color = outlineVariant)
+                        // Kesik Çizgi Ayracı
+                        DashedDivider(color = outlineVariant)
 
-                    // Fatura Detayları
-                    Column(
-                        modifier = Modifier.fillMaxWidth().padding(24.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        ReceiptDetailRow(label = "Station", value = "VoltCharge Plaza")
-                        ReceiptDetailRow(label = "Date", value = "25 Oct 2026") // Proje tarihine uyarlandı
-                        ReceiptDetailRow(label = "Time", value = "14:30")
-                        ReceiptDetailRow(label = "Energy", value = "45 kWh")
-                        ReceiptDetailRow(label = "Duration", value = "42 mins")
-                        ReceiptDetailRow(label = "Transaction ID", value = "#VC-882910")
-                    }
+                        // Fatura Detayları
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(24.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            // Dinamik Satırlar
+                            ReceiptDetailRow(label = "Date", value = dateStr)
+                            ReceiptDetailRow(label = "Time", value = timeStr)
 
-                    // Kesik Çizgi Ayracı
-                    DashedDivider(color = outlineVariant)
+                            if (tx.description != null) {
+                                ReceiptDetailRow(label = "Description", value = tx.description)
+                            }
 
-                    // Alt Kısım: Toplam Tutar
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(surfaceContainer)
-                            .padding(24.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Total Amount", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = onSurface)
-                        Text("₺12.50", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = primaryColor)
+                            // ID'nin son 8 hanesini göster (Daha şık durur)
+                            val shortId = tx.transactionID.takeLast(8).uppercase()
+                            ReceiptDetailRow(label = "Transaction ID", value = "#VC-$shortId")
+                        }
+
+                        // Kesik Çizgi Ayracı
+                        DashedDivider(color = outlineVariant)
+
+                        // Alt Kısım: Toplam Tutar
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(surfaceContainer)
+                                .padding(24.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Total Amount",
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = onSurface
+                            )
+                            Text(
+                                "₺${displayAmount}",
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = primaryColor
+                            )
+                        }
                     }
                 }
             }
-
-            Spacer(modifier = Modifier.height(100.dp)) // Alttaki butonların arkasında kalmaması için
         }
+        Spacer(modifier = Modifier.height(100.dp)) // Alttaki butonların arkasında kalmaması için
     }
+
 }
 
 // Fatura Satırları için Helper Composable

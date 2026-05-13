@@ -1,11 +1,17 @@
 package com.maherlabbad.EVChargingSystem.Screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Email
@@ -19,15 +25,57 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.maherlabbad.EVChargingSystem.Viewmodels.AuthViewModel
 
 @Composable
-fun LoginScreen(modifier : Modifier = Modifier) {
+fun LoginScreen(
+    onLoginSuccess : (String) -> Unit,
+    onNavigateToSignUp : () -> Unit,
+    viewModel: AuthViewModel = viewModel()
+) {
+    val isLoading by viewModel.isLoading.collectAsState()
+    val errorMessage by viewModel.errorMessage.collectAsState()
+    val isSuccess by viewModel.isAuthSuccessful.collectAsState()
+    val context = LocalContext.current
+    val role by viewModel.role.collectAsState()
+
+    var hasLocationPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    // İzin isteme penceresini (Launcher) hazırlıyoruz
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { isGranted ->
+            hasLocationPermission = isGranted // Kullanıcı izin verirse state güncellenir
+        }
+    )
+
+    // Sayfa ilk açıldığında çalışır: İzin yoksa Pop-up çıkarır
+    LaunchedEffect(Unit) {
+        if (!hasLocationPermission) {
+            permissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+    }
+
+    // Eğer giriş başarılı olursa ana sayfaya (Harita) yönlendir
+    LaunchedEffect(isSuccess) {
+        if (isSuccess) {
+            onLoginSuccess(role ?: "")
+        }
+    }
+
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
@@ -36,7 +84,7 @@ fun LoginScreen(modifier : Modifier = Modifier) {
     val primaryColor = Color(0xFF0058BC)
 
     Surface(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
         color = Color(0xFFF9F9FF) // bg-background
     ) {
         Column(
@@ -46,6 +94,7 @@ fun LoginScreen(modifier : Modifier = Modifier) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
+
             // --- Logo ve Başlık Kısmı ---
             Box(
                 modifier = Modifier
@@ -164,26 +213,35 @@ fun LoginScreen(modifier : Modifier = Modifier) {
 
                     Spacer(modifier = Modifier.height(32.dp))
 
+                    if (errorMessage != null) {
+                        Text(text = errorMessage!!, color = Color.Red, modifier = Modifier.padding(bottom = 8.dp))
+                    }
                     // Login Butonu
                     Button(
-                        onClick = { /* Login Aksiyonu (Supabase Auth çağrısı buraya gelecek) */ },
+                        onClick = {
+                            viewModel.login(email, password)
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(56.dp),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
                     ) {
-                        Row(
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(text = "Login", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = "Arrow Forward",
-                                modifier = Modifier.size(20.dp)
-                            )
+                        if (isLoading) {
+                            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp))
+                        } else {
+                            Row(
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(text = "Login", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                    contentDescription = "Arrow Forward",
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
                     }
 
@@ -200,7 +258,7 @@ fun LoginScreen(modifier : Modifier = Modifier) {
                             color = primaryColor,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.clickable { /* Kayıt ekranına yönlendirme */ }
+                            modifier = Modifier.clickable { onNavigateToSignUp() }
                         )
                     }
                 }
